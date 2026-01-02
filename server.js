@@ -398,6 +398,135 @@ app.post('/api/translate', async (req, res) => {
     }
 })
 
+// Summarize video endpoint
+app.post('/api/summarize', async (req, res) => {
+    const { transcript } = req.body
+
+    try {
+        if (!transcript || !Array.isArray(transcript) || transcript.length === 0) {
+            return res.status(400).json({ error: 'Transcript array is required' })
+        }
+
+        console.log('=== Generating Summary ===')
+        console.log('Transcript segments:', transcript.length)
+
+        // Combine all transcript text
+        const fullText = transcript.map(seg => seg.text).join(' ')
+        const wordCount = fullText.split(/\s+/).length
+        console.log('Total words:', wordCount)
+
+        // Extract key information from transcript
+        const sentences = fullText.split(/[.!?]+/).filter(s => s.trim().length > 0)
+
+        // Get unique words for vocabulary extraction
+        const words = fullText.toLowerCase().split(/\s+/)
+        const wordFrequency = {}
+        words.forEach(word => {
+            const clean = word.replace(/[^a-záéíóúñü]/gi, '')
+            if (clean.length > 3) {
+                wordFrequency[clean] = (wordFrequency[clean] || 0) + 1
+            }
+        })
+
+        // Get top frequent words (likely key vocabulary)
+        const topWords = Object.entries(wordFrequency)
+            .sort((a, b) => b[1] - a[1])
+            .slice(0, 15)
+            .map(([word]) => word)
+
+        // Create summary sections
+        // Take first few sentences for intro
+        const introSentences = sentences.slice(0, 3).join('. ').trim()
+        // Take sentences from middle for main content
+        const middleStart = Math.floor(sentences.length * 0.3)
+        const middleSentences = sentences.slice(middleStart, middleStart + 3).join('. ').trim()
+        // Take last sentences for conclusion
+        const conclusionSentences = sentences.slice(-3).join('. ').trim()
+
+        // Build Spanish summary (200-500 words target)
+        let spanishSummary = `📝 RESUMEN DEL VIDEO
+
+📌 INTRODUCCIÓN:
+${introSentences}.
+
+📖 CONTENIDO PRINCIPAL:
+${middleSentences}.
+
+Este video contiene aproximadamente ${wordCount} palabras y ${transcript.length} segmentos de contenido.
+
+🎯 PUNTOS CLAVE:
+${sentences.slice(0, 5).map((s, i) => `${i + 1}. ${s.trim()}`).join('\n')}.
+
+📚 VOCABULARIO IMPORTANTE:
+${topWords.slice(0, 10).join(', ')}
+
+🔚 CONCLUSIÓN:
+${conclusionSentences}.
+
+---
+📊 Estadísticas:
+- Duración del contenido: ${Math.floor(transcript[transcript.length - 1]?.end || 0)} segundos
+- Total de segmentos: ${transcript.length}
+- Palabras totales: ${wordCount}`
+
+        // Translate summary to Vietnamese
+        console.log('Translating summary to Vietnamese...')
+        let vietnameseSummary = ''
+
+        try {
+            const result = await translate(spanishSummary, { from: 'es', to: 'vi' })
+            if (result && result.text) {
+                vietnameseSummary = result.text
+                console.log('✓ Summary translated to Vietnamese')
+            }
+        } catch (translateError) {
+            console.log('Translation failed, trying fallback:', translateError.message)
+
+            // Try MyMemory as fallback
+            try {
+                const response = await fetch(
+                    `https://api.mymemory.translated.net/get?q=${encodeURIComponent(spanishSummary.substring(0, 500))}&langpair=es|vi`
+                )
+                const data = await response.json()
+                if (data.responseStatus === 200 && data.responseData) {
+                    vietnameseSummary = data.responseData.translatedText
+                }
+            } catch (e) {
+                console.log('MyMemory fallback failed:', e.message)
+            }
+        }
+
+        // If translation failed, provide a basic Vietnamese version
+        if (!vietnameseSummary) {
+            vietnameseSummary = `📝 TÓM TẮT VIDEO
+
+(Bản dịch tự động không khả dụng. Vui lòng đọc phiên bản tiếng Tây Ban Nha.)
+
+📊 Thống kê:
+- Thời lượng: ${Math.floor(transcript[transcript.length - 1]?.end || 0)} giây
+- Tổng số đoạn: ${transcript.length}
+- Tổng số từ: ${wordCount}`
+        }
+
+        console.log('✓ Summary generated successfully')
+
+        res.json({
+            spanish: spanishSummary,
+            vietnamese: vietnameseSummary,
+            stats: {
+                wordCount,
+                segmentCount: transcript.length,
+                duration: Math.floor(transcript[transcript.length - 1]?.end || 0),
+                topVocabulary: topWords.slice(0, 10)
+            }
+        })
+
+    } catch (error) {
+        console.error('Summarize error:', error)
+        res.status(500).json({ error: error.message })
+    }
+})
+
 app.listen(PORT, () => {
     console.log(`🚀 Server running on http://localhost:${PORT}`)
 })

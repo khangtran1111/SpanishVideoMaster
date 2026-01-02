@@ -239,7 +239,8 @@ function App() {
     const [currentTime, setCurrentTime] = useState(0)
     const [selectedWord, setSelectedWord] = useState(null)
     const [showSummary, setShowSummary] = useState(false)
-    const [summary, setSummary] = useState('')
+    const [summary, setSummary] = useState({ spanish: '', vietnamese: '', stats: null })
+    const [isSummarizing, setIsSummarizing] = useState(false)
     const [showTest, setShowTest] = useState(false)
     const [testAnswers, setTestAnswers] = useState({})
     const [testSubmitted, setTestSubmitted] = useState(false)
@@ -370,27 +371,46 @@ function App() {
         }
     }
 
-    const generateSummary = () => {
-        setSummary(`
-📝 **Video Summary**
+    const generateSummary = async () => {
+        if (transcript.length === 0) {
+            alert('No transcript available to summarize')
+            return
+        }
 
-**Main Content:**
-This video is a basic introductory Spanish lesson, covering common greetings and self-introduction phrases.
-
-**Key Vocabulary (B2):**
-- Hola: Hello
-- ¿Cómo estás?: How are you?
-- Buenos días: Good morning
-- Me llamo: My name is
-
-**Grammar:**
-- Verb "estar" (temporary state): estás
-- Reflexive verb "llamarse": Me llamo
-- Plural adjective: Buenos días
-
-**Level:** Suitable for B2 learners, focused on everyday communication
-    `)
+        setIsSummarizing(true)
         setShowSummary(true)
+        setSummary({ spanish: '', vietnamese: '', stats: null })
+
+        try {
+            const response = await fetch(`${API_BASE_URL}/api/summarize`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ transcript })
+            })
+
+            if (!response.ok) {
+                throw new Error('Failed to generate summary')
+            }
+
+            const data = await response.json()
+            setSummary({
+                spanish: data.spanish,
+                vietnamese: data.vietnamese,
+                stats: data.stats
+            })
+            console.log('✓ Summary generated:', data.stats)
+        } catch (error) {
+            console.error('Summary error:', error)
+            setSummary({
+                spanish: 'Error generating summary. Please try again.',
+                vietnamese: 'Lỗi khi tạo tóm tắt. Vui lòng thử lại.',
+                stats: null
+            })
+        } finally {
+            setIsSummarizing(false)
+        }
     }
 
     const seekToTimestamp = (timestamp) => {
@@ -719,14 +739,69 @@ This video is a basic introductory Spanish lesson, covering common greetings and
             {/* Summary Modal */}
             {showSummary && (
                 <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setShowSummary(false)}>
-                    <div className="bg-gradient-to-br from-gray-900 to-blue-900 rounded-2xl p-8 max-w-3xl w-full border-2 border-blue-500/50 shadow-2xl max-h-[80vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+                    <div className="bg-gradient-to-br from-gray-900 to-blue-900 rounded-2xl p-8 max-w-5xl w-full border-2 border-blue-500/50 shadow-2xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
                         <div className="flex justify-between items-start mb-6">
-                            <h2 className="text-3xl font-bold">📄 Video Summary</h2>
+                            <h2 className="text-3xl font-bold">📄 Video Summary / Tóm Tắt Video</h2>
                             <button onClick={() => setShowSummary(false)} className="text-gray-400 hover:text-white text-2xl">×</button>
                         </div>
-                        <div className="prose prose-invert max-w-none">
-                            <pre className="whitespace-pre-wrap font-sans text-gray-200 leading-relaxed">{summary}</pre>
-                        </div>
+
+                        {isSummarizing ? (
+                            <div className="text-center py-12">
+                                <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-blue-500 mx-auto mb-6"></div>
+                                <p className="text-xl">Generating summary...</p>
+                                <p className="text-gray-400 mt-2">Đang tạo tóm tắt...</p>
+                            </div>
+                        ) : (
+                            <div className="grid md:grid-cols-2 gap-6">
+                                {/* Spanish Summary */}
+                                <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-xl p-6">
+                                    <div className="flex items-center gap-2 mb-4">
+                                        <span className="text-2xl">🇪🇸</span>
+                                        <h3 className="text-xl font-bold text-yellow-400">Español (Spanish)</h3>
+                                    </div>
+                                    <div className="prose prose-invert max-w-none">
+                                        <pre className="whitespace-pre-wrap font-sans text-gray-200 leading-relaxed text-sm">{summary.spanish}</pre>
+                                    </div>
+                                </div>
+
+                                {/* Vietnamese Summary */}
+                                <div className="bg-blue-500/10 border border-blue-500/30 rounded-xl p-6">
+                                    <div className="flex items-center gap-2 mb-4">
+                                        <span className="text-2xl">🇻🇳</span>
+                                        <h3 className="text-xl font-bold text-blue-400">Tiếng Việt (Vietnamese)</h3>
+                                    </div>
+                                    <div className="prose prose-invert max-w-none">
+                                        <pre className="whitespace-pre-wrap font-sans text-gray-200 leading-relaxed text-sm">{summary.vietnamese}</pre>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Stats Footer */}
+                        {summary.stats && (
+                            <div className="mt-6 pt-6 border-t border-white/10">
+                                <div className="flex flex-wrap gap-4 justify-center text-sm">
+                                    <div className="bg-white/10 px-4 py-2 rounded-lg">
+                                        <span className="text-gray-400">📊 Words:</span>
+                                        <span className="font-bold ml-2">{summary.stats.wordCount}</span>
+                                    </div>
+                                    <div className="bg-white/10 px-4 py-2 rounded-lg">
+                                        <span className="text-gray-400">📝 Segments:</span>
+                                        <span className="font-bold ml-2">{summary.stats.segmentCount}</span>
+                                    </div>
+                                    <div className="bg-white/10 px-4 py-2 rounded-lg">
+                                        <span className="text-gray-400">⏱️ Duration:</span>
+                                        <span className="font-bold ml-2">{Math.floor(summary.stats.duration / 60)}m {summary.stats.duration % 60}s</span>
+                                    </div>
+                                </div>
+                                {summary.stats.topVocabulary && (
+                                    <div className="mt-4 text-center">
+                                        <span className="text-gray-400 text-sm">🔤 Key Vocabulary: </span>
+                                        <span className="text-yellow-400 text-sm">{summary.stats.topVocabulary.join(', ')}</span>
+                                    </div>
+                                )}
+                            </div>
+                        )}
                     </div>
                 </div>
             )}
