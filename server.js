@@ -3,6 +3,7 @@ import cors from 'cors'
 import { YoutubeTranscript } from 'youtube-transcript'
 import { getSubtitles } from 'youtube-caption-extractor'
 import { translate } from '@vitalets/google-translate-api'
+import translateGoogle from 'translate-google-api'
 
 const app = express()
 const PORT = 3002
@@ -371,58 +372,63 @@ async function translateWithFallbacks(text, from = 'es', to = 'vi') {
     }
 
     let translation = null
+    let method = 'none'
 
-    // Method 1: Google Translate
+    // Method 1: translate-google-api (most reliable, different endpoint)
     try {
-        const result = await translate(text, { from, to })
-        if (result && result.text) {
-            translation = result.text
+        const result = await translateGoogle(text, { from, to })
+        if (result && result[0] && result[0] !== text) {
+            translation = result[0]
+            method = 'translate-google-api'
         }
     } catch (e) {
-        // Silent fail, try next method
+        console.log('  ✗ translate-google-api failed:', e.message)
     }
 
-    // Method 2: Lingva Translate (free, open-source)
+    // Method 2: @vitalets/google-translate-api (backup Google)
     if (!translation) {
         try {
-            const response = await fetch(
-                `https://lingva.ml/api/v1/${from}/${to}/${encodeURIComponent(text)}`,
-                { timeout: 5000 }
-            )
-            if (response.ok) {
-                const data = await response.json()
-                if (data.translation) {
-                    translation = data.translation
-                }
+            const result = await translate(text, { from, to })
+            if (result && result.text && result.text !== text) {
+                translation = result.text
+                method = 'Google Translate'
             }
         } catch (e) {
-            // Silent fail
+            console.log('  ✗ Google Translate failed:', e.message.substring(0, 50))
         }
     }
 
     // Method 3: MyMemory API
     if (!translation) {
         try {
+            const textChunk = text.substring(0, 500)
             const response = await fetch(
-                `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${from}|${to}`
+                `https://api.mymemory.translated.net/get?q=${encodeURIComponent(textChunk)}&langpair=${from}|${to}`
             )
             const data = await response.json()
+
             if (data.responseStatus === 200 && data.responseData && data.responseData.translatedText) {
-                translation = data.responseData.translatedText
+                const translated = data.responseData.translatedText
+                if (translated !== textChunk && !translated.includes('NEXT AVAILABLE IN')) {
+                    translation = translated
+                    method = 'MyMemory'
+                }
             }
         } catch (e) {
-            // Silent fail
+            console.log('  ✗ MyMemory failed:', e.message)
         }
     }
 
     // Fallback: return original text
     if (!translation) {
+        console.log('  ⚠️ All translation failed for:', text.substring(0, 30))
         translation = text
+    } else {
+        console.log(`  ✓ ${method}: ${text.substring(0, 20)}... → ${translation.substring(0, 20)}...`)
     }
 
     // Cache the result
     if (translationCache.size >= CACHE_MAX_SIZE) {
-        // Remove oldest entries (first 500)
         const keys = Array.from(translationCache.keys()).slice(0, 500)
         keys.forEach(k => translationCache.delete(k))
     }
@@ -555,44 +561,49 @@ ${conclusionSentences}.
 - Total de segmentos: ${transcript.length}
 - Palabras totales: ${wordCount}`
 
-        // Translate summary to Vietnamese
-        console.log('Translating summary to Vietnamese...')
-        let vietnameseSummary = ''
+        // Translate summary to Vietnamese in smaller chunks for better reliability
+        console.log('Translating summary to Vietnamese in chunks...')
 
-        try {
-            const result = await translate(spanishSummary, { from: 'es', to: 'vi' })
-            if (result && result.text) {
-                vietnameseSummary = result.text
-                console.log('✓ Summary translated to Vietnamese')
-            }
-        } catch (translateError) {
-            console.log('Translation failed, trying fallback:', translateError.message)
+        // Translate each section separately
+        const [introVi, mainVi, conclusionVi, vocabVi] = await Promise.all([
+            translateWithFallbacks(introSentences, 'es', 'vi'),
+            translateWithFallbacks(middleSentences, 'es', 'vi'),
+            translateWithFallbacks(conclusionSentences, 'es', 'vi'),
+            translateWithFallbacks(topWords.slice(0, 10).join(', '), 'es', 'vi')
+        ])
 
-            // Try MyMemory as fallback
-            try {
-                const response = await fetch(
-                    `https://api.mymemory.translated.net/get?q=${encodeURIComponent(spanishSummary.substring(0, 500))}&langpair=es|vi`
-                )
-                const data = await response.json()
-                if (data.responseStatus === 200 && data.responseData) {
-                    vietnameseSummary = data.responseData.translatedText
-                }
-            } catch (e) {
-                console.log('MyMemory fallback failed:', e.message)
-            }
-        }
+        // Translate key points
+        const keyPointsVi = await Promise.all(
+            sentences.slice(0, 5).map(s => translateWithFallbacks(s.trim(), 'es', 'vi'))
+        )
 
-        // If translation failed, provide a basic Vietnamese version
-        if (!vietnameseSummary) {
-            vietnameseSummary = `📝 TÓM TẮT VIDEO
+        // Build Vietnamese summary
+        const vietnameseSummary = `📝 TÓM TẮT VIDEO
 
-(Bản dịch tự động không khả dụng. Vui lòng đọc phiên bản tiếng Tây Ban Nha.)
+📌 GIỚI THIỆU:
+${introVi}.
 
+📖 NỘI DUNG CHÍNH:
+${mainVi}.
+
+Video này chứa khoảng ${wordCount} từ và ${transcript.length} đoạn nội dung.
+
+🎯 ĐIỂM CHÍNH:
+${keyPointsVi.map((s, i) => `${i + 1}. ${s}`).join('\n')}.
+
+📚 TỪ VỰNG QUAN TRỌNG:
+${vocabVi}
+
+🔚 KẾT LUẬN:
+${conclusionVi}.
+
+---
 📊 Thống kê:
-- Thời lượng: ${Math.floor(transcript[transcript.length - 1]?.end || 0)} giây
+- Thời lượng nội dung: ${Math.floor(transcript[transcript.length - 1]?.end || 0)} giây
 - Tổng số đoạn: ${transcript.length}
 - Tổng số từ: ${wordCount}`
-        }
+
+        console.log('✓ Summary translated to Vietnamese')
 
         console.log('✓ Summary generated successfully')
 

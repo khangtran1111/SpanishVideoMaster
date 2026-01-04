@@ -335,17 +335,17 @@ function App() {
 
             // Translate in background using batch API for better performance
             console.log('Starting batch translation for', fetchedTranscript.length, 'segments...')
-            
+
             const BATCH_SIZE = 10 // Translate 10 segments at a time
             const translatedSegments = [...initialTranscript]
-            
+
             for (let i = 0; i < fetchedTranscript.length; i += BATCH_SIZE) {
                 const batch = fetchedTranscript.slice(i, i + BATCH_SIZE)
                 const texts = batch.map(seg => seg.text)
-                
+
                 try {
                     const translations = await batchTranslate(texts)
-                    
+
                     // Update the segments with translations
                     for (let j = 0; j < batch.length; j++) {
                         translatedSegments[i + j] = {
@@ -353,11 +353,11 @@ function App() {
                             translation: translations[j] || fetchedTranscript[i + j].text
                         }
                     }
-                    
+
                     // Update state to show progress
                     setTranscript([...translatedSegments])
                     setTranslationProgress(Math.min(100, Math.round(((i + batch.length) / fetchedTranscript.length) * 100)))
-                    
+
                 } catch (batchError) {
                     console.warn(`Batch translation failed for segments ${i}-${i + BATCH_SIZE}:`, batchError.message)
                     // Fallback: mark as original text
@@ -529,38 +529,6 @@ function App() {
                         <div className="mt-4 text-sm text-gray-400">
                             💡 <strong>Info:</strong> Paste a YouTube URL with Spanish captions. The app will fetch real transcripts and translate to Vietnamese!
                         </div>
-                        <div className="mt-4">
-                            <button
-                                onClick={async () => {
-                                    try {
-                                        console.log('Testing backend at:', API_BASE_URL)
-                                        const res = await fetch(`${API_BASE_URL}/api/health`, {
-                                            headers: {
-                                                'Accept': 'application/json'
-                                            }
-                                        })
-                                        console.log('Response status:', res.status)
-                                        const contentType = res.headers.get('content-type')
-                                        console.log('Content-Type:', contentType)
-
-                                        if (contentType && contentType.includes('application/json')) {
-                                            const data = await res.json()
-                                            alert(`✅ Backend Connected!\n${data.message}\n\nServer: ${API_BASE_URL}`)
-                                        } else {
-                                            const text = await res.text()
-                                            console.error('Response is not JSON:', text.substring(0, 200))
-                                            alert(`❌ Backend returned HTML instead of JSON!\n\nThe backend server may not be running properly.\n\nPlease restart the backend server:\n1. Close any running server windows\n2. Run: npm run server\n\nResponse preview: ${text.substring(0, 100)}`)
-                                        }
-                                    } catch (err) {
-                                        console.error('Backend connection error:', err)
-                                        alert(`❌ Cannot Connect to Backend!\n\nError: ${err.message}\n\nMake sure:\n1. Backend server is running (npm run server)\n2. Server is on port 3002\n3. Check the separate PowerShell window\n\nTrying to connect to: ${API_BASE_URL}`)
-                                    }
-                                }}
-                                className="text-xs px-4 py-2 bg-white/5 rounded-lg hover:bg-white/10 transition-all"
-                            >
-                                🔧 Test Backend Connection
-                            </button>
-                        </div>
                     </div>
                 )}
 
@@ -708,7 +676,7 @@ function App() {
                                         <span className="text-sm">{translationProgress}%</span>
                                     </div>
                                     <div className="w-full bg-white/20 rounded-full h-2">
-                                        <div 
+                                        <div
                                             className="bg-blue-500 h-2 rounded-full transition-all duration-300"
                                             style={{ width: `${translationProgress}%` }}
                                         ></div>
@@ -735,7 +703,7 @@ function App() {
                                     />
                                     <div className="flex justify-between text-xs text-gray-400">
                                         <span>Earlier ←</span>
-                                        <button 
+                                        <button
                                             onClick={() => setCaptionOffset(DEFAULT_CAPTION_OFFSET)}
                                             className="text-purple-400 hover:text-purple-300"
                                         >
@@ -834,7 +802,7 @@ function App() {
             {/* Summary Modal */}
             {showSummary && (
                 <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={() => setShowSummary(false)}>
-                    <div className="bg-gradient-to-br from-gray-900 to-blue-900 rounded-2xl p-8 max-w-5xl w-full border-2 border-blue-500/50 shadow-2xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
+                    <div className="bg-gradient-to-br from-gray-900 to-blue-900 rounded-2xl p-8 max-w-7xl w-full border-2 border-blue-500/50 shadow-2xl max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
                         <div className="flex justify-between items-start mb-6">
                             <h2 className="text-3xl font-bold">📄 Video Summary / Tóm Tắt Video</h2>
                             <button onClick={() => setShowSummary(false)} className="text-gray-400 hover:text-white text-2xl">×</button>
