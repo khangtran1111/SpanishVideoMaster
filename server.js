@@ -7,11 +7,15 @@ import { translate } from '@vitalets/google-translate-api'
 const app = express()
 const PORT = 3002
 
+// Translation cache to avoid repeated API calls
+const translationCache = new Map()
+const CACHE_MAX_SIZE = 5000
+
 app.use(cors({
     origin: ['http://localhost:3001', 'http://localhost:3000', 'http://127.0.0.1:3001', 'http://127.0.0.1:3000'],
     credentials: true
 }))
-app.use(express.json())
+app.use(express.json({ limit: '10mb' }))
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
@@ -354,7 +358,80 @@ app.get('/api/transcript/:videoId', async (req, res) => {
     }
 })
 
-// Translation endpoint with multiple fallbacks
+// Helper function to translate with multiple fallbacks and caching
+async function translateWithFallbacks(text, from = 'es', to = 'vi') {
+    if (!text || text.trim().length === 0) {
+        return text
+    }
+
+    // Check cache first
+    const cacheKey = `${from}:${to}:${text}`
+    if (translationCache.has(cacheKey)) {
+        return translationCache.get(cacheKey)
+    }
+
+    let translation = null
+
+    // Method 1: Google Translate
+    try {
+        const result = await translate(text, { from, to })
+        if (result && result.text) {
+            translation = result.text
+        }
+    } catch (e) {
+        // Silent fail, try next method
+    }
+
+    // Method 2: Lingva Translate (free, open-source)
+    if (!translation) {
+        try {
+            const response = await fetch(
+                `https://lingva.ml/api/v1/${from}/${to}/${encodeURIComponent(text)}`,
+                { timeout: 5000 }
+            )
+            if (response.ok) {
+                const data = await response.json()
+                if (data.translation) {
+                    translation = data.translation
+                }
+            }
+        } catch (e) {
+            // Silent fail
+        }
+    }
+
+    // Method 3: MyMemory API
+    if (!translation) {
+        try {
+            const response = await fetch(
+                `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=${from}|${to}`
+            )
+            const data = await response.json()
+            if (data.responseStatus === 200 && data.responseData && data.responseData.translatedText) {
+                translation = data.responseData.translatedText
+            }
+        } catch (e) {
+            // Silent fail
+        }
+    }
+
+    // Fallback: return original text
+    if (!translation) {
+        translation = text
+    }
+
+    // Cache the result
+    if (translationCache.size >= CACHE_MAX_SIZE) {
+        // Remove oldest entries (first 500)
+        const keys = Array.from(translationCache.keys()).slice(0, 500)
+        keys.forEach(k => translationCache.delete(k))
+    }
+    translationCache.set(cacheKey, translation)
+
+    return translation
+}
+
+// Translation endpoint with caching
 app.post('/api/translate', async (req, res) => {
     const { text } = req.body
 
@@ -363,38 +440,47 @@ app.post('/api/translate', async (req, res) => {
             return res.status(400).json({ error: 'Text is required' })
         }
 
-        // Method 1: Try Google Translate (unlimited, but unofficial)
-        try {
-            const result = await translate(text, { from: 'es', to: 'vi' })
-            if (result && result.text) {
-                console.log('✓ Google Translate:', text.substring(0, 30), '→', result.text.substring(0, 30))
-                return res.json({ translation: result.text })
-            }
-        } catch (googleError) {
-            console.log('Google Translate failed:', googleError.message)
-        }
-
-        // Method 2: Fallback to MyMemory API
-        try {
-            const response = await fetch(
-                `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text)}&langpair=es|vi`
-            )
-            const data = await response.json()
-
-            if (data.responseStatus === 200 && data.responseData) {
-                console.log('✓ MyMemory:', text.substring(0, 30), '→', data.responseData.translatedText.substring(0, 30))
-                return res.json({ translation: data.responseData.translatedText })
-            }
-        } catch (mymemoryError) {
-            console.log('MyMemory failed:', mymemoryError.message)
-        }
-
-        // Method 3: Last resort - return original text
-        console.log('⚠️ All translation methods failed, returning original')
-        res.json({ translation: text })
+        const translation = await translateWithFallbacks(text)
+        res.json({ translation })
     } catch (error) {
         console.error('Translation error:', error)
         res.json({ translation: text || '' })
+    }
+})
+
+// Batch translation endpoint - translate multiple texts at once
+app.post('/api/translate-batch', async (req, res) => {
+    const { texts, from = 'es', to = 'vi' } = req.body
+
+    try {
+        if (!texts || !Array.isArray(texts)) {
+            return res.status(400).json({ error: 'Texts array is required' })
+        }
+
+        console.log(`Batch translating ${texts.length} texts...`)
+
+        // Translate in parallel with small batches to avoid rate limits
+        const BATCH_SIZE = 5
+        const results = []
+
+        for (let i = 0; i < texts.length; i += BATCH_SIZE) {
+            const batch = texts.slice(i, i + BATCH_SIZE)
+            const batchResults = await Promise.all(
+                batch.map(text => translateWithFallbacks(text, from, to))
+            )
+            results.push(...batchResults)
+
+            // Small delay between batches to avoid rate limiting
+            if (i + BATCH_SIZE < texts.length) {
+                await new Promise(resolve => setTimeout(resolve, 100))
+            }
+        }
+
+        console.log(`✓ Batch translation complete: ${results.length} texts`)
+        res.json({ translations: results })
+    } catch (error) {
+        console.error('Batch translation error:', error)
+        res.status(500).json({ error: error.message })
     }
 })
 

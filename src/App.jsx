@@ -4,6 +4,9 @@ import confetti from 'canvas-confetti'
 
 const API_BASE_URL = 'http://127.0.0.1:3002'
 
+// Caption sync offset (negative = captions appear earlier, positive = later)
+const DEFAULT_CAPTION_OFFSET = -1.5 // seconds - adjust captions to appear 1.5s earlier
+
 // Helper function to fetch YouTube transcript via backend server
 async function fetchYouTubeTranscript(videoId, preferredLang = 'es') {
     try {
@@ -34,6 +37,31 @@ async function fetchYouTubeTranscript(videoId, preferredLang = 'es') {
     } catch (error) {
         console.error('Error fetching transcript:', error)
         throw error
+    }
+}
+
+// Helper function to batch translate texts
+async function batchTranslate(texts) {
+    try {
+        const response = await fetch(`${API_BASE_URL}/api/translate-batch`, {
+            method: 'POST',
+            headers: {
+                'Accept': 'application/json',
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ texts })
+        })
+
+        if (!response.ok) {
+            console.error('Batch translation API error:', response.status)
+            return texts // Return original texts as fallback
+        }
+
+        const data = await response.json()
+        return data.translations || texts
+    } catch (error) {
+        console.error('Batch translation error:', error)
+        return texts
     }
 }
 
@@ -235,8 +263,11 @@ function App() {
     const [videoUrl, setVideoUrl] = useState('')
     const [videoId, setVideoId] = useState(null)
     const [isProcessing, setIsProcessing] = useState(false)
+    const [isTranslating, setIsTranslating] = useState(false)
+    const [translationProgress, setTranslationProgress] = useState(0)
     const [transcript, setTranscript] = useState([])
     const [currentTime, setCurrentTime] = useState(0)
+    const [captionOffset, setCaptionOffset] = useState(DEFAULT_CAPTION_OFFSET)
     const [selectedWord, setSelectedWord] = useState(null)
     const [showSummary, setShowSummary] = useState(false)
     const [summary, setSummary] = useState({ spanish: '', vietnamese: '', stats: null })
@@ -270,6 +301,7 @@ function App() {
         setIsProcessing(true)
         setVideoId(id)
         setTranscript([]) // Clear previous transcript
+        setTranslationProgress(0)
 
         try {
             console.log('=== Processing Video ===')
@@ -292,47 +324,57 @@ function App() {
             // Show first few segments for debugging
             console.log('First 3 segments:', fetchedTranscript.slice(0, 3).map(s => s.text))
 
-            // Translate each segment to Vietnamese progressively
-            // Start with empty translations to show transcript immediately
+            // IMMEDIATELY show video with Spanish transcript (no translation wait)
             const initialTranscript = fetchedTranscript.map(segment => ({
                 ...segment,
-                translation: '...' // Placeholder while translating
+                translation: '⏳ Translating...' // Placeholder while translating
             }))
             setTranscript(initialTranscript)
+            setIsProcessing(false) // Video is ready to play immediately!
+            setIsTranslating(true)
 
-            // Translate in background and update progressively
-            console.log('Starting translation for', fetchedTranscript.length, 'segments...')
+            // Translate in background using batch API for better performance
+            console.log('Starting batch translation for', fetchedTranscript.length, 'segments...')
+            
+            const BATCH_SIZE = 10 // Translate 10 segments at a time
             const translatedSegments = [...initialTranscript]
-
-            for (let i = 0; i < fetchedTranscript.length; i++) {
+            
+            for (let i = 0; i < fetchedTranscript.length; i += BATCH_SIZE) {
+                const batch = fetchedTranscript.slice(i, i + BATCH_SIZE)
+                const texts = batch.map(seg => seg.text)
+                
                 try {
-                    const vietnameseTranslation = await translateToVietnamese(fetchedTranscript[i].text)
-                    translatedSegments[i] = {
-                        ...fetchedTranscript[i],
-                        translation: vietnameseTranslation
+                    const translations = await batchTranslate(texts)
+                    
+                    // Update the segments with translations
+                    for (let j = 0; j < batch.length; j++) {
+                        translatedSegments[i + j] = {
+                            ...fetchedTranscript[i + j],
+                            translation: translations[j] || fetchedTranscript[i + j].text
+                        }
                     }
-
-                    // Update state every 5 translations to show progress
-                    if (i % 5 === 0 || i === fetchedTranscript.length - 1) {
-                        setTranscript([...translatedSegments])
+                    
+                    // Update state to show progress
+                    setTranscript([...translatedSegments])
+                    setTranslationProgress(Math.min(100, Math.round(((i + batch.length) / fetchedTranscript.length) * 100)))
+                    
+                } catch (batchError) {
+                    console.warn(`Batch translation failed for segments ${i}-${i + BATCH_SIZE}:`, batchError.message)
+                    // Fallback: mark as original text
+                    for (let j = 0; j < batch.length; j++) {
+                        translatedSegments[i + j] = {
+                            ...fetchedTranscript[i + j],
+                            translation: fetchedTranscript[i + j].text
+                        }
                     }
-
-                    // Small delay to avoid rate limiting
-                    if (i % 3 === 0) {
-                        await new Promise(resolve => setTimeout(resolve, 50))
-                    }
-                } catch (transError) {
-                    console.warn(`Translation failed for segment ${i}:`, transError.message)
-                    translatedSegments[i] = {
-                        ...fetchedTranscript[i],
-                        translation: fetchedTranscript[i].text // Fallback to original
-                    }
+                    setTranscript([...translatedSegments])
                 }
             }
 
             console.log('✓ Translation complete:', translatedSegments.length, 'segments')
             setTranscript(translatedSegments)
-            setIsProcessing(false)
+            setIsTranslating(false)
+            setTranslationProgress(100)
         } catch (error) {
             console.error('❌ Error processing video:', error)
             const errorMessage = error.message || 'Unknown error'
@@ -342,6 +384,7 @@ function App() {
             // Fallback to mock data if fetch fails
             setTranscript(MOCK_TRANSCRIPT)
             setIsProcessing(false)
+            setIsTranslating(false)
         }
     }
 
@@ -349,17 +392,20 @@ function App() {
         setCurrentTime(state.playedSeconds)
     }
 
+    // Get current segment with caption offset applied
     const getCurrentSegment = () => {
+        const adjustedTime = currentTime - captionOffset // Apply offset
         return transcript.find(seg =>
-            currentTime >= seg.start && currentTime < seg.end
+            adjustedTime >= seg.start && adjustedTime < seg.end
         )
     }
 
     const getCurrentWord = () => {
         const segment = getCurrentSegment()
         if (!segment) return null
-        return segment.words.find(word =>
-            currentTime >= word.start && currentTime < word.end
+        const adjustedTime = currentTime - captionOffset
+        return segment.words?.find(word =>
+            adjustedTime >= word.start && adjustedTime < word.end
         )
     }
 
@@ -652,6 +698,55 @@ function App() {
                                 >
                                     🔄 New Video
                                 </button>
+                            </div>
+
+                            {/* Translation Progress */}
+                            {isTranslating && (
+                                <div className="bg-blue-500/20 backdrop-blur-md rounded-2xl p-4 border border-blue-500/30">
+                                    <div className="flex items-center justify-between mb-2">
+                                        <span className="text-sm font-bold">🔄 Translating...</span>
+                                        <span className="text-sm">{translationProgress}%</span>
+                                    </div>
+                                    <div className="w-full bg-white/20 rounded-full h-2">
+                                        <div 
+                                            className="bg-blue-500 h-2 rounded-full transition-all duration-300"
+                                            style={{ width: `${translationProgress}%` }}
+                                        ></div>
+                                    </div>
+                                </div>
+                            )}
+
+                            {/* Caption Sync Control */}
+                            <div className="bg-white/10 backdrop-blur-md rounded-2xl p-6 border border-purple-500/30">
+                                <h3 className="text-lg font-bold mb-3">⏱️ Caption Sync</h3>
+                                <div className="space-y-3">
+                                    <div className="flex items-center justify-between">
+                                        <span className="text-sm">Offset:</span>
+                                        <span className="font-bold text-yellow-400">{captionOffset.toFixed(1)}s</span>
+                                    </div>
+                                    <input
+                                        type="range"
+                                        min="-5"
+                                        max="5"
+                                        step="0.1"
+                                        value={captionOffset}
+                                        onChange={(e) => setCaptionOffset(parseFloat(e.target.value))}
+                                        className="w-full h-2 bg-white/20 rounded-lg appearance-none cursor-pointer"
+                                    />
+                                    <div className="flex justify-between text-xs text-gray-400">
+                                        <span>Earlier ←</span>
+                                        <button 
+                                            onClick={() => setCaptionOffset(DEFAULT_CAPTION_OFFSET)}
+                                            className="text-purple-400 hover:text-purple-300"
+                                        >
+                                            Reset
+                                        </button>
+                                        <span>→ Later</span>
+                                    </div>
+                                    <p className="text-xs text-gray-400 mt-2">
+                                        💡 Adjust if captions are out of sync with audio
+                                    </p>
+                                </div>
                             </div>
 
                             {/* Progress */}
