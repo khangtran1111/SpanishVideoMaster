@@ -276,6 +276,12 @@ function App() {
     const [testAnswers, setTestAnswers] = useState({})
     const [testSubmitted, setTestSubmitted] = useState(false)
     const [testScore, setTestScore] = useState(0)
+    const [showReadingTest, setShowReadingTest] = useState(false)
+    const [readingTest, setReadingTest] = useState(null)
+    const [readingAnswers, setReadingAnswers] = useState({})
+    const [readingSubmitted, setReadingSubmitted] = useState(false)
+    const [readingScore, setReadingScore] = useState(0)
+    const [isGeneratingTest, setIsGeneratingTest] = useState(false)
     const [showDrills, setShowDrills] = useState(false)
     const [isPlaying, setIsPlaying] = useState(false)
     const playerRef = useRef(null)
@@ -456,6 +462,66 @@ function App() {
             })
         } finally {
             setIsSummarizing(false)
+        }
+    }
+
+    const generateReadingTest = async () => {
+        if (transcript.length === 0) {
+            alert('No transcript available to generate test')
+            return
+        }
+
+        setIsGeneratingTest(true)
+        setShowReadingTest(true)
+        setReadingTest(null)
+        setReadingAnswers({})
+        setReadingSubmitted(false)
+
+        try {
+            const response = await fetch(`${API_BASE_URL}/api/reading-test`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ transcript })
+            })
+
+            if (!response.ok) {
+                throw new Error('Failed to generate reading test')
+            }
+
+            const data = await response.json()
+            setReadingTest(data)
+            console.log('✓ Reading test generated:', data.totalQuestions, 'questions')
+        } catch (error) {
+            console.error('Reading test error:', error)
+            alert('Error generating reading test. Please try again.')
+            setShowReadingTest(false)
+        } finally {
+            setIsGeneratingTest(false)
+        }
+    }
+
+    const submitReadingTest = () => {
+        let correct = 0
+        readingTest.questions.forEach(q => {
+            if (q.type === 'true-false') {
+                if (readingAnswers[q.id] === q.correct) correct++
+            } else if (q.type === 'multiple-choice' || q.type === 'gap-fill') {
+                if (readingAnswers[q.id] === q.correct) correct++
+            }
+        })
+        const score = Math.round((correct / readingTest.questions.length) * 100)
+        setReadingScore(score)
+        setReadingSubmitted(true)
+
+        // Celebration if passed
+        if (score >= 70) {
+            confetti({
+                particleCount: 100,
+                spread: 70,
+                origin: { y: 0.6 }
+            })
         }
     }
 
@@ -659,6 +725,12 @@ function App() {
                                     className="w-full px-4 py-3 bg-gradient-to-r from-green-500 to-emerald-500 rounded-lg font-bold hover:from-green-600 hover:to-emerald-600 transition-all"
                                 >
                                     ✍️ B2 Listening Test
+                                </button>
+                                <button
+                                    onClick={generateReadingTest}
+                                    className="w-full px-4 py-3 bg-gradient-to-r from-orange-500 to-red-500 rounded-lg font-bold hover:from-orange-600 hover:to-red-600 transition-all"
+                                >
+                                    📖 B2 Reading Test
                                 </button>
                                 <button
                                     onClick={() => setVideoId(null)}
@@ -1042,6 +1114,184 @@ function App() {
                                 </button>
                             </div>
                         )}
+                    </div>
+                </div>
+            )}
+
+            {/* DELE B2 Reading Test Modal - Instituto Cervantes Format */}
+            {showReadingTest && (
+                <div className="fixed inset-0 bg-black/70 backdrop-blur-sm z-50 overflow-y-auto">
+                    <div className="min-h-screen flex items-start justify-center p-4 py-8">
+                        <div className="bg-gradient-to-br from-gray-900 to-orange-900 rounded-2xl p-6 md:p-8 max-w-4xl w-full border-2 border-orange-500/50 shadow-2xl" onClick={e => e.stopPropagation()}>
+                            {/* Header - Fixed at top */}
+                            <div className="flex justify-between items-start mb-6 sticky top-0 bg-gradient-to-br from-gray-900 to-orange-900 pt-2 pb-4 -mt-2 z-10">
+                                <div>
+                                    <h2 className="text-2xl md:text-3xl font-bold">📖 DELE B2 - Comprensión de Lectura</h2>
+                                    <p className="text-gray-400 mt-1 text-sm md:text-base">Instituto Cervantes | Tiempo estimado: 20 minutos | {readingTest?.questions?.length || 6} preguntas</p>
+                                </div>
+                                <button onClick={() => { setShowReadingTest(false); setReadingSubmitted(false); setReadingAnswers({}) }} className="text-gray-400 hover:text-white text-3xl hover:bg-white/10 rounded-full w-10 h-10 flex items-center justify-center">×</button>
+                            </div>
+
+                            {isGeneratingTest ? (
+                                <div className="text-center py-12">
+                                    <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-orange-500 mx-auto mb-6"></div>
+                                    <p className="text-xl">Generando prueba de lectura DELE B2...</p>
+                                    <p className="text-gray-400 mt-2">Analizando contenido del video...</p>
+                                </div>
+                            ) : readingTest ? (
+                                !readingSubmitted ? (
+                                    <div className="space-y-6">
+                                        {/* Instructions Box */}
+                                        <div className="bg-orange-500/10 border border-orange-500/30 rounded-lg p-4">
+                                            <h3 className="font-bold text-orange-400 mb-2">📋 Instrucciones</h3>
+                                            <p className="text-sm text-gray-300 whitespace-pre-line">{readingTest.instructions}</p>
+                                        </div>
+
+                                        {/* Questions */}
+                                        {readingTest.questions.map((q, idx) => (
+                                            <div key={q.id} className="bg-white/10 rounded-xl p-5 md:p-6 border border-orange-500/30">
+                                                {/* Tarea label */}
+                                                {q.tarea && (
+                                                    <div className="text-xs text-orange-400 font-semibold mb-2 uppercase tracking-wide">{q.tarea}</div>
+                                                )}
+
+                                                <div className="flex justify-between items-start mb-4 gap-3">
+                                                    <h3 className="text-base md:text-lg font-bold">
+                                                        <span className="text-orange-400">Pregunta {idx + 1}:</span> {q.question || q.statement}
+                                                    </h3>
+                                                    <span className="text-xs bg-orange-500/30 px-3 py-1 rounded-full whitespace-nowrap flex-shrink-0">
+                                                        {q.type === 'multiple-choice' ? 'Opción múltiple' : q.type === 'true-false' ? 'V/F' : q.type}
+                                                    </span>
+                                                </div>
+
+                                                {/* Context if available */}
+                                                {q.context && (
+                                                    <div className="bg-white/5 rounded-lg p-3 mb-4 text-sm text-gray-300 italic border-l-4 border-orange-500/50">
+                                                        "{q.context}..."
+                                                    </div>
+                                                )}
+
+                                                {q.type === 'multiple-choice' && (
+                                                    <div className="space-y-2">
+                                                        {q.options.map(opt => (
+                                                            <label key={opt.id} className="flex items-center p-3 bg-white/5 rounded-lg hover:bg-white/10 cursor-pointer transition-all">
+                                                                <input
+                                                                    type="radio"
+                                                                    name={`q${q.id}`}
+                                                                    value={opt.id}
+                                                                    checked={readingAnswers[q.id] === opt.id}
+                                                                    onChange={(e) => setReadingAnswers({ ...readingAnswers, [q.id]: e.target.value })}
+                                                                    className="mr-3"
+                                                                />
+                                                                <span>{opt.text}</span>
+                                                            </label>
+                                                        ))}
+                                                    </div>
+                                                )}
+
+                                                {q.type === 'true-false' && (
+                                                    <div className="space-y-2">
+                                                        <label className="flex items-center p-3 bg-white/5 rounded-lg hover:bg-white/10 cursor-pointer transition-all">
+                                                            <input
+                                                                type="radio"
+                                                                name={`q${q.id}`}
+                                                                value={true}
+                                                                checked={readingAnswers[q.id] === true}
+                                                                onChange={() => setReadingAnswers({ ...readingAnswers, [q.id]: true })}
+                                                                className="mr-3"
+                                                            />
+                                                            <span>Verdadero (True)</span>
+                                                        </label>
+                                                        <label className="flex items-center p-3 bg-white/5 rounded-lg hover:bg-white/10 cursor-pointer transition-all">
+                                                            <input
+                                                                type="radio"
+                                                                name={`q${q.id}`}
+                                                                value={false}
+                                                                checked={readingAnswers[q.id] === false}
+                                                                onChange={() => setReadingAnswers({ ...readingAnswers, [q.id]: false })}
+                                                                className="mr-3"
+                                                            />
+                                                            <span>Falso (False)</span>
+                                                        </label>
+                                                    </div>
+                                                )}
+
+                                                {q.type === 'gap-fill' && (
+                                                    <div className="space-y-3">
+                                                        <p className="font-mono text-sm bg-white/5 p-3 rounded-lg">{q.sentence}</p>
+                                                        <div className="space-y-2">
+                                                            {q.options?.map(opt => (
+                                                                <label key={opt} className="flex items-center p-3 bg-white/5 rounded-lg hover:bg-white/10 cursor-pointer transition-all">
+                                                                    <input
+                                                                        type="radio"
+                                                                        name={`q${q.id}`}
+                                                                        value={opt}
+                                                                        checked={readingAnswers[q.id] === opt}
+                                                                        onChange={() => setReadingAnswers({ ...readingAnswers, [q.id]: opt })}
+                                                                        className="mr-3"
+                                                                    />
+                                                                    <span>{opt}</span>
+                                                                </label>
+                                                            ))}
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        ))}
+
+                                        <button
+                                            onClick={submitReadingTest}
+                                            className="w-full px-6 py-4 bg-gradient-to-r from-orange-500 to-red-500 rounded-xl font-bold text-white hover:from-orange-600 hover:to-red-600 transition-all text-lg"
+                                        >
+                                            📊 Enviar Prueba
+                                        </button>
+                                    </div>
+                                ) : (
+                                    <div className="space-y-6">
+                                        {/* Score */}
+                                        <div className={`text-center p-8 rounded-2xl ${readingScore >= 60 ? 'bg-green-500/20 border-2 border-green-500' : 'bg-red-500/20 border-2 border-red-500'}`}>
+                                            <div className="text-6xl font-bold mb-4">{readingScore}%</div>
+                                            <div className="text-2xl font-bold">
+                                                {readingScore >= 60 ? '🎉 ¡Aprobado! DELE B2 Comprensión de Lectura' : '📖 Sigue practicando - Necesitas 60% para aprobar'}
+                                            </div>
+                                            <div className="text-gray-400 mt-2">
+                                                {readingTest.questions.filter((q) => readingAnswers[q.id] === q.correct).length} de {readingTest.questions.length} respuestas correctas
+                                            </div>
+                                        </div>
+
+                                        {/* Review Answers */}
+                                        <div className="space-y-4">
+                                            <h3 className="font-bold text-lg">📝 Revisión de respuestas:</h3>
+                                            {readingTest.questions.map((q, idx) => {
+                                                const isCorrect = readingAnswers[q.id] === q.correct
+
+                                                return (
+                                                    <div key={q.id} className={`p-4 rounded-lg ${isCorrect ? 'bg-green-500/20 border-l-4 border-green-500' : 'bg-red-500/20 border-l-4 border-red-500'}`}>
+                                                        <div className="font-bold mb-2">{isCorrect ? '✓' : '✗'} Pregunta {idx + 1}: {q.tarea && <span className="text-xs text-gray-400 font-normal">({q.tarea})</span>}</div>
+                                                        <p className="text-sm text-gray-300 mb-2">{q.explanation}</p>
+                                                        <div className="text-xs text-gray-400">
+                                                            Tu respuesta: <span className="font-mono">{readingAnswers[q.id] === undefined ? 'Sin respuesta' : String(readingAnswers[q.id])}</span>
+                                                            {!isCorrect && <span className="ml-3 text-green-400">Correcta: {String(q.correct)}</span>}
+                                                        </div>
+                                                    </div>
+                                                )
+                                            })}
+                                        </div>
+
+                                        <button
+                                            onClick={() => { setReadingSubmitted(false); setReadingAnswers({}); setShowReadingTest(false) }}
+                                            className="w-full px-6 py-4 bg-white/10 rounded-xl font-bold hover:bg-white/20 transition-all"
+                                        >
+                                            ✓ Cerrar
+                                        </button>
+                                    </div>
+                                )
+                            ) : (
+                                <div className="text-center py-8 text-red-400">
+                                    <p>Error loading reading test. Please try again.</p>
+                                </div>
+                            )}
+                        </div>
                     </div>
                 </div>
             )}

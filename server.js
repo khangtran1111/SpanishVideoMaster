@@ -624,6 +624,149 @@ ${conclusionVi}.
     }
 })
 
+// DELE B2 Reading Test Endpoint - Instituto Cervantes Format
+app.post('/api/reading-test', async (req, res) => {
+    const { transcript } = req.body
+
+    try {
+        if (!transcript || !Array.isArray(transcript) || transcript.length === 0) {
+            return res.status(400).json({ error: 'Transcript array is required' })
+        }
+
+        console.log('=== Generating DELE B2 Reading Test (Instituto Cervantes Format) ===')
+        console.log('Transcript segments:', transcript.length)
+
+        // Extract sentences from transcript
+        const fullText = transcript.map(seg => seg.text).join(' ')
+        const sentences = fullText.split(/[.!?]+/).filter(s => s.trim().length > 10)
+
+        console.log('Total sentences extracted:', sentences.length)
+
+        if (sentences.length < 6) {
+            return res.status(400).json({ error: 'Transcript too short for reading test. Need at least 6 sentences.' })
+        }
+
+        // DELE B2 Reading Comprehension - 6 Questions following Instituto Cervantes format
+        const questions = []
+
+        // TAREA 1: Comprensión global (General Understanding)
+        // Question 1: Main idea identification
+        const introSentence = sentences[0].trim()
+        questions.push({
+            id: 1,
+            type: 'multiple-choice',
+            tarea: 'Tarea 1: Comprensión global',
+            question: 'Según el texto, ¿cuál es la idea principal del contenido?',
+            context: introSentence.substring(0, 150),
+            options: [
+                { id: 'a', text: `El texto trata sobre: ${introSentence.split(' ').slice(0, 6).join(' ')}...` },
+                { id: 'b', text: 'El texto presenta información irrelevante al tema.' },
+                { id: 'c', text: 'El texto no tiene una idea principal clara.' }
+            ],
+            correct: 'a',
+            explanation: 'La idea principal se establece al inicio del texto.'
+        })
+
+        // Question 2: Purpose of text
+        const midSentence = sentences[Math.floor(sentences.length * 0.3)].trim()
+        questions.push({
+            id: 2,
+            type: 'multiple-choice',
+            tarea: 'Tarea 1: Comprensión global',
+            question: '¿Cuál es el propósito principal de este texto?',
+            context: midSentence.substring(0, 120),
+            options: [
+                { id: 'a', text: 'Informar y explicar sobre un tema específico.' },
+                { id: 'b', text: 'Convencer al lector de una opinión política.' },
+                { id: 'c', text: 'Entretener con una historia ficticia.' }
+            ],
+            correct: 'a',
+            explanation: 'El texto tiene un propósito informativo y explicativo.'
+        })
+
+        // TAREA 2: Información específica (Specific Information)
+        // Question 3: Detail identification
+        const detailSentence1 = sentences[Math.floor(sentences.length * 0.4)].trim()
+        questions.push({
+            id: 3,
+            type: 'true-false',
+            tarea: 'Tarea 2: Información específica',
+            statement: `Según el texto: "${detailSentence1.substring(0, 100)}..."`,
+            correct: true,
+            explanation: 'Esta información aparece explícitamente en el texto.'
+        })
+
+        // Question 4: Vocabulary in context
+        const vocabSentence = sentences[Math.floor(sentences.length * 0.5)].trim()
+        const words = vocabSentence.split(/\s+/).filter(w => w.length > 4)
+        const targetWord = words[Math.floor(words.length / 2)] || 'información'
+        questions.push({
+            id: 4,
+            type: 'multiple-choice',
+            tarea: 'Tarea 2: Información específica',
+            question: `En el contexto "${vocabSentence.substring(0, 80)}...", ¿qué significa o implica la palabra "${targetWord}"?`,
+            options: [
+                { id: 'a', text: 'Se refiere al concepto mencionado en el contexto.' },
+                { id: 'b', text: 'Tiene un significado opuesto al esperado.' },
+                { id: 'c', text: 'Es una palabra sin relación con el tema.' }
+            ],
+            correct: 'a',
+            explanation: `La palabra "${targetWord}" se usa en su contexto habitual.`
+        })
+
+        // TAREA 3: Comprensión detallada (Detailed Comprehension)
+        // Question 5: Inference
+        const inferenceSentence = sentences[Math.floor(sentences.length * 0.6)].trim()
+        questions.push({
+            id: 5,
+            type: 'multiple-choice',
+            tarea: 'Tarea 3: Comprensión detallada',
+            question: `A partir de la información: "${inferenceSentence.substring(0, 90)}...", ¿qué se puede inferir?`,
+            options: [
+                { id: 'a', text: 'La información sugiere una relación causa-efecto.' },
+                { id: 'b', text: 'No hay ninguna conclusión posible.' },
+                { id: 'c', text: 'El autor contradice su propia afirmación.' }
+            ],
+            correct: 'a',
+            explanation: 'Esta inferencia se puede deducir del contexto presentado.'
+        })
+
+        // Question 6: Author's intention/tone
+        const conclusionSentence = sentences[Math.floor(sentences.length * 0.8)].trim()
+        questions.push({
+            id: 6,
+            type: 'multiple-choice',
+            tarea: 'Tarea 3: Comprensión detallada',
+            question: '¿Cuál es el tono general del autor en este texto?',
+            context: conclusionSentence.substring(0, 100),
+            options: [
+                { id: 'a', text: 'Objetivo e informativo.' },
+                { id: 'b', text: 'Sarcástico y crítico.' },
+                { id: 'c', text: 'Emotivo y personal.' }
+            ],
+            correct: 'a',
+            explanation: 'El autor mantiene un tono objetivo a lo largo del texto.'
+        })
+
+        console.log(`✓ Generated ${questions.length} DELE B2 reading questions (Instituto Cervantes format)`)
+
+        res.json({
+            level: 'B2',
+            examType: 'DELE - Instituto Cervantes',
+            testType: 'Comprensión de Lectura',
+            totalQuestions: questions.length,
+            estimatedTime: '20 minutos',
+            passingScore: 60,
+            questions: questions,
+            instructions: 'PRUEBA DE COMPRENSIÓN DE LECTURA - DELE B2\n\nLea atentamente el contenido y conteste las preguntas seleccionando la opción correcta (A, B o C) o indicando si la afirmación es verdadera o falsa.\n\nTiempo recomendado: 20 minutos\nPuntuación mínima para aprobar: 60%'
+        })
+
+    } catch (error) {
+        console.error('Reading test error:', error)
+        res.status(500).json({ error: error.message })
+    }
+})
+
 app.listen(PORT, () => {
     console.log(`🚀 Server running on http://localhost:${PORT}`)
 })
